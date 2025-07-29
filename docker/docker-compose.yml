@@ -1,0 +1,111 @@
+version: "3.8"
+
+services:
+  spark-master:
+    image: bitnami/spark:3.4.1
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_SUBMIT_OPTIONS=--conf spark.jars.ivy=/home/sparkuser/.ivy
+
+      
+    ports:
+      - "7077:7077"  # Spark master port
+      - "8080:8080"  # Spark Web UI
+    volumes:
+      - ../data:/data
+      - ../scripts:/scripts
+      - ../ivy:/home/sparkuser/.ivy
+
+    networks:
+      - default
+
+  spark-worker-1:
+    image: bitnami/spark:3.4.1
+    container_name: spark-worker-1
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=1G
+    ports:
+      - "8081:8081"
+    networks:
+      - default
+
+  spark-worker-2:
+    image: bitnami/spark:3.4.1
+    container_name: spark-worker-2
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=1G
+    ports:
+      - "8082:8081"  # Remappé en local 8082 mais toujours port interne 8081
+    networks:
+      - default
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console Web UI
+    volumes:
+      - ../data:/data
+    networks:
+      - default
+
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_USER: superset
+      POSTGRES_PASSWORD: superset_password
+      POSTGRES_DB: superset_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - default  
+
+  superset:
+    image: apache/superset:latest
+    container_name: superset
+    depends_on:
+      - postgres
+    environment:
+      SUPERSET_ENV: production
+      SUPERSET_SECRET_KEY: "your-secret-key"
+      SUPERSET_SQLALCHEMY_DATABASE_URI: postgresql+psycopg2://superset:superset_password@postgres:5432/superset_db
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset_home:/app/superset_home
+    command: >
+      /bin/bash -c "
+      superset db upgrade &&
+      superset init &&
+      superset run -h 0.0.0.0 -p 8088"
+    networks:
+      - default
+
+volumes:
+  pgdata:
+  superset_home:
+
+networks:
+  default:
+    name: bigdata-network
